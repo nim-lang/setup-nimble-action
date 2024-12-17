@@ -122,7 +122,7 @@ if [[ "$os" = "Windows" ]]; then
   curl -sSL "https://curl.se/ca/cacert.pem" -o "${nimble_install_dir}/bin/cacert.pem"
 
   info "Downloading Nimble..."
-  curl -sSL "${download_url}" >nimble.zip
+  curl -sSL "${download_url}" > nimble.zip
   # Try the new structure (direct exe)
   unzip -j -o nimble.zip "nimble.exe" -d "${nimble_install_dir}/bin" ||
     # If that fails, try the old structure (nested exe)
