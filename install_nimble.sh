@@ -55,26 +55,26 @@ while ((0 < $#)); do
   opt=$1
   shift
   case $opt in
-    --nimble-version)
-      nimble_version=$1
-      shift
-      ;;
-    --nimble-install-directory)
-      nimble_install_dir=$1
-      shift
-      ;;
-    --parent-nimble-install-directory)
-      parent_nimble_install_dir=$1
-      shift
-      ;;
-    --os)
-      os=$1
-      shift
-      ;;
-    --repo-token)
-      repo_token=$1
-      shift
-      ;;
+  --nimble-version)
+    nimble_version=$1
+    shift
+    ;;
+  --nimble-install-directory)
+    nimble_install_dir=$1
+    shift
+    ;;
+  --parent-nimble-install-directory)
+    parent_nimble_install_dir=$1
+    shift
+    ;;
+  --os)
+    os=$1
+    shift
+    ;;
+  --repo-token)
+    repo_token=$1
+    shift
+    ;;
   esac
 done
 
@@ -116,13 +116,13 @@ arch="x64"
 if [[ "$os" = "Windows" ]]; then
   download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-windows_${arch}.zip"
   info "Downloading from: ${download_url}"
-  
+
   # Download SSL certificates for Windows
   info "Downloading SSL certificates..."
   curl -sSL "https://curl.se/ca/cacert.pem" -o "${nimble_install_dir}/bin/cacert.pem"
-  
+
   info "Downloading Nimble..."
-  curl -sSL "${download_url}" > nimble.zip
+  curl -sSL "${download_url}" >nimble.zip
   # Try the new structure (direct exe)
   unzip -j -o nimble.zip "nimble.exe" -d "${nimble_install_dir}/bin" ||
     # If that fails, try the old structure (nested exe)
