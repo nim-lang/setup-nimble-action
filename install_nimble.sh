@@ -90,7 +90,13 @@ cd "$parent_nimble_install_dir"
 # get exact version
 if [[ "$nimble_version" = "latest" ]]; then
   info "Finding latest version..."
+  echo "Available tags:"
+  fetch_tags
   nimble_version=$(fetch_tags | latest_version)
+  if [[ -z "$nimble_version" ]]; then
+    err "Failed to determine latest version"
+    exit 1
+  fi
   info "Latest version is: $nimble_version"
 elif [[ "$nimble_version" =~ ^[0-9]+\.[0-9]+\.x$ ]] || [[ "$nimble_version" =~ ^[0-9]+\.x$ ]]; then
   nimble_version="$(fetch_tags | grep -E "$(tag_regexp "$nimble_version")" | latest_version)"
@@ -110,6 +116,12 @@ arch="x64"
 if [[ "$os" = "Windows" ]]; then
   download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-windows_${arch}.zip"
   info "Downloading from: ${download_url}"
+  
+  # Download SSL certificates for Windows
+  info "Downloading SSL certificates..."
+  curl -sSL "https://curl.se/ca/cacert.pem" -o "${nimble_install_dir}/bin/cacert.pem"
+  
+  info "Downloading Nimble..."
   curl -sSL "${download_url}" > nimble.zip
   # Try the new structure (direct exe)
   unzip -j -o nimble.zip "nimble.exe" -d "${nimble_install_dir}/bin" ||
