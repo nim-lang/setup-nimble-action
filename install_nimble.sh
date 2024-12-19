@@ -13,8 +13,7 @@ err() {
 }
 
 fetch_tags() {
-  info "Fetching tags..."
-  response=$(curl \
+  response=$(curl -sSL \
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: Bearer ${repo_token}" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
@@ -106,16 +105,14 @@ cd "$parent_nimble_install_dir"
 # get exact version
 if [[ "$nimble_version" = "latest" ]]; then
   info "Finding latest version..."
-  echo "Available tags:"
-  fetch_tags
-  nimble_version=$(fetch_tags | latest_version)
+  nimble_version=$(fetch_tags)
   if [[ -z "$nimble_version" ]]; then
     err "Failed to determine latest version"
     exit 1
   fi
   info "Latest version is: $nimble_version"
 elif [[ "$nimble_version" =~ ^[0-9]+\.[0-9]+\.x$ ]] || [[ "$nimble_version" =~ ^[0-9]+\.x$ ]]; then
-  nimble_version="$(fetch_tags | grep -E "$(tag_regexp "$nimble_version")" | latest_version)"
+  nimble_version=$(fetch_tags | grep -E "$(tag_regexp "$nimble_version")" | latest_version)
 fi
 
 info "Installing nimble $nimble_version"
