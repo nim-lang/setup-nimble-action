@@ -20,10 +20,6 @@ fetch_tags() {
     -H "X-GitHub-Api-Version: 2022-11-28" \
     https://api.github.com/repos/nim-lang/nimble/git/refs/tags)
   
-
-  # info "Raw API response:"
-  # echo "$response"
-  
   version=$(echo "$response" | jq -r 'if type == "array" then .[].ref else empty end' |
     sed -E 's:^refs/tags/v::' |
     sed -E 's:^refs/tags/::' |
@@ -48,17 +44,16 @@ tag_regexp() {
 }
 
 latest_version() {
-  # Read all versions into an array
-  mapfile -t versions < <(sort -V)
+  # Get the highest version using sort -V
+  version=$(sort -V | tail -n1)
   
-  # Check if we got any versions
-  if [ ${#versions[@]} -eq 0 ]; then
+  # Check if we got a version
+  if [[ -z "$version" ]]; then
     err "No valid versions found"
     exit 1
   fi
   
-  # Return the last (highest) version
-  echo "${versions[-1]}"
+  echo "$version"
 }
 
 print_available_versions() {
@@ -108,9 +103,6 @@ fi
 
 cd "$parent_nimble_install_dir"
 
-# Print available versions
-# print_available_versions
-
 # get exact version
 if [[ "$nimble_version" = "latest" ]]; then
   info "Finding latest version..."
@@ -140,11 +132,11 @@ arch="x64"
 if [[ "$os" = "Windows" ]]; then
   download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-windows_${arch}.zip"
   info "Downloading from: ${download_url}"
-
+  
   # Download SSL certificates for Windows
   info "Downloading SSL certificates..."
   curl -sSL "https://curl.se/ca/cacert.pem" -o "${nimble_install_dir}/bin/cacert.pem"
-
+  
   info "Downloading Nimble..."
   curl -sSL "${download_url}" > nimble.zip
   # Try the new structure (direct exe)
@@ -153,10 +145,14 @@ if [[ "$os" = "Windows" ]]; then
     unzip -j -o nimble.zip "*/nimble.exe" -d "${nimble_install_dir}/bin"
   rm -f nimble.zip
 elif [[ "$os" = "macOS" || "$os" = "Darwin" ]]; then
+  # Trim any whitespace from version number
+  nimble_version=$(echo "${nimble_version}" | tr -d '[:space:]')
   download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-macosx_${arch}.tar.gz"
   info "Downloading from: ${download_url}"
   curl -sSL "${download_url}" | tar xvz -C "${nimble_install_dir}/bin"
 else
+  # Trim any whitespace from version number
+  nimble_version=$(echo "${nimble_version}" | tr -d '[:space:]')
   download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-linux_${arch}.tar.gz"
   info "Downloading from: ${download_url}"
   curl -sSL "${download_url}" | tar xvz -C "${nimble_install_dir}/bin"
