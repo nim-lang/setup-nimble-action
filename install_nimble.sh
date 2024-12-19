@@ -20,14 +20,22 @@ fetch_tags() {
     -H "X-GitHub-Api-Version: 2022-11-28" \
     https://api.github.com/repos/nim-lang/nimble/git/refs/tags)
   
-  # Debug output
-  info "Raw API response:"
-  echo "$response"
+
+  # info "Raw API response:"
+  # echo "$response"
   
-  echo "$response" | jq -r 'if type == "array" then .[].ref else empty end' |
+  version=$(echo "$response" | jq -r 'if type == "array" then .[].ref else empty end' |
     sed -E 's:^refs/tags/v::' |
     sed -E 's:^refs/tags/::' |
-    grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$'
+    grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$' |
+    sort -V | tail -n1)
+    
+  if [[ -z "$version" ]]; then
+    err "Failed to extract version number"
+    exit 1
+  fi
+  
+  echo "$version"
 }
 
 tag_regexp() {
@@ -40,7 +48,17 @@ tag_regexp() {
 }
 
 latest_version() {
-  sort -V | tail -n 1
+  # Read all versions into an array
+  mapfile -t versions < <(sort -V)
+  
+  # Check if we got any versions
+  if [ ${#versions[@]} -eq 0 ]; then
+    err "No valid versions found"
+    exit 1
+  fi
+  
+  # Return the last (highest) version
+  echo "${versions[-1]}"
 }
 
 print_available_versions() {
