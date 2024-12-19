@@ -13,12 +13,18 @@ err() {
 }
 
 fetch_tags() {
-  # https://docs.github.com/ja/rest/git/refs?apiVersion=2022-11-28
-  curl \
+  info "Fetching tags..."
+  response=$(curl \
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: Bearer ${repo_token}" \
-    -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/nim-lang/nimble/git/refs/tags |
-    jq -r '.[].ref' |
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    https://api.github.com/repos/nim-lang/nimble/git/refs/tags)
+  
+  # Debug output
+  info "Raw API response:"
+  echo "$response"
+  
+  echo "$response" | jq -r 'if type == "array" then .[].ref else empty end' |
     sed -E 's:^refs/tags/v::' |
     sed -E 's:^refs/tags/::' |
     grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$'
