@@ -103,14 +103,21 @@ fi
 cd "$parent_nimble_install_dir"
 
 # get exact version
-if [[ "$nimble_version" = "latest" ]]; then
+if [[ "$nimble_version" = "latest" || "$nimble_version" = "nightly" ]]; then
   info "Finding latest version..."
-  nimble_version=$(fetch_tags)
-  if [[ -z "$nimble_version" ]]; then
-    err "Failed to determine latest version"
-    exit 1
+  if [[ "$nimble_version" = "nightly" ]]; then
+    # For nightly, use the 'latest' tag directly
+    nimble_version="latest"
+    info "Using nightly build from 'latest' tag"
+  else
+    # For 'latest', fetch the highest numbered version
+    nimble_version=$(fetch_tags)
+    if [[ -z "$nimble_version" ]]; then
+      err "Failed to determine latest version"
+      exit 1
+    fi
+    info "Latest stable version is: $nimble_version"
   fi
-  info "Latest version is: $nimble_version"
 elif [[ "$nimble_version" =~ ^[0-9]+\.[0-9]+\.x$ ]] || [[ "$nimble_version" =~ ^[0-9]+\.x$ ]]; then
   nimble_version=$(fetch_tags | grep -E "$(tag_regexp "$nimble_version")" | latest_version)
 fi
@@ -127,7 +134,12 @@ mkdir -p "${nimble_install_dir}/bin"
 arch="x64"
 
 if [[ "$os" = "Windows" ]]; then
-  download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-windows_${arch}.zip"
+  # Handle nightly/latest tag differently
+  if [[ "$nimble_version" = "latest" ]]; then
+    download_url="https://github.com/nim-lang/nimble/releases/download/latest/nimble-windows_${arch}.zip"
+  else
+    download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-windows_${arch}.zip"
+  fi
   info "Downloading from: ${download_url}"
   
   # Download SSL certificates for Windows
@@ -142,15 +154,21 @@ if [[ "$os" = "Windows" ]]; then
     unzip -j -o nimble.zip "*/nimble.exe" -d "${nimble_install_dir}/bin"
   rm -f nimble.zip
 elif [[ "$os" = "macOS" || "$os" = "Darwin" ]]; then
-  # Trim any whitespace from version number
   nimble_version=$(echo "${nimble_version}" | tr -d '[:space:]')
-  download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-macosx_${arch}.tar.gz"
+  if [[ "$nimble_version" = "latest" ]]; then
+    download_url="https://github.com/nim-lang/nimble/releases/download/latest/nimble-macosx_${arch}.tar.gz"
+  else
+    download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-macosx_${arch}.tar.gz"
+  fi
   info "Downloading from: ${download_url}"
   curl -sSL "${download_url}" | tar xvz -C "${nimble_install_dir}/bin"
 else
-  # Trim any whitespace from version number
   nimble_version=$(echo "${nimble_version}" | tr -d '[:space:]')
-  download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-linux_${arch}.tar.gz"
+  if [[ "$nimble_version" = "latest" ]]; then
+    download_url="https://github.com/nim-lang/nimble/releases/download/latest/nimble-linux_${arch}.tar.gz"
+  else
+    download_url="https://github.com/nim-lang/nimble/releases/download/v${nimble_version}/nimble-linux_${arch}.tar.gz"
+  fi
   info "Downloading from: ${download_url}"
   curl -sSL "${download_url}" | tar xvz -C "${nimble_install_dir}/bin"
 fi
