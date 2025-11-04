@@ -24,10 +24,36 @@ inputs:
   repo-token:
     description: 'The GITHUB_TOKEN secret'
     required: false
+  install-dlls:
+    description: 'Install Nim DLLs on Windows'
+    default: 'true'
+    required: false
 
 runs:
   using: 'composite'
   steps:
+    - name: Cache Nim DLLs (Windows)
+      if: runner.os == 'Windows' && inputs.install-dlls == 'true'
+      uses: actions/cache@v4
+      id: cache-nim-dlls
+      with:
+        path: nim-dlls.zip
+        key: nim-dlls-${{ runner.os }}
+
+    - name: Download Nim DLLs (Windows)
+      if: runner.os == 'Windows' && inputs.install-dlls == 'true' && steps.cache-nim-dlls.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile nim-dlls.zip
+
+    - name: Setup Nim DLLs (Windows)
+      if: runner.os == 'Windows' && inputs.install-dlls == 'true'
+      shell: pwsh
+      run: |
+        Expand-Archive -Path nim-dlls.zip -DestinationPath nim-dlls -Force
+        echo "$Env:GITHUB_WORKSPACE\nim-dlls" >> $Env:GITHUB_PATH
+        echo "SSL_CERT_FILE=$Env:GITHUB_WORKSPACE\nim-dlls\cacert.pem" >> $Env:GITHUB_ENV
+
     - name: Install nimble
       shell: bash
       run: |
