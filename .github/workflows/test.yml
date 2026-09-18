@@ -205,3 +205,78 @@ jobs:
           assert_fails "definitely-not-a-real-ref"
           # A ref must not be able to redirect the API call to another repo.
           assert_fails "../../../repos/torvalds/linux/commits/master"
+
+  # The installed nimble must match the runner it is on. `latest` publishes a
+  # native asset for every arch here
+  test-native-arch:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest      # x64
+          - ubuntu-24.04-arm   # arm64
+          - macOS-latest       # arm64 (Apple Silicon)
+          - macos-15-intel     # x64
+          - windows-latest     # x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          nimble-version: latest
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert nimble matches the host architecture
+        shell: bash
+        run: |
+          set -eu
+          bin=$(command -v nimble)
+          desc=$(file -b "$bin")
+          host=$(uname -m)
+          echo "host=$host  binary=$desc"
+
+          case "$host" in
+            arm64 | aarch64) expect='arm64|aarch64' ;;
+            # `file` writes x86-64 on Linux and x86_64 on macOS.
+            x86_64)          expect='x86-64|x86_64|PE32\+' ;;
+            *)               echo "unhandled host arch $host"; exit 1 ;;
+          esac
+
+          if ! printf '%s' "$desc" | grep -qE "$expect"; then
+            echo "Expected a $host binary, got: $desc"
+            exit 1
+          fi
+          echo "ok: native $host binary"
+
+  # macOS only started publishing macosx_aarch64 at 0.22.2, so an older pin on
+  # Apple Silicon must fall back to x64 -- and must say so loudly.
+  test-arch-fallback:
+    runs-on: macOS-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Older nimble on arm64 falls back to x64 with a warning
+        shell: bash
+        env:
+          GITHUB_ACTIONS: "true"
+        run: |
+          set -eu
+          out=$(./install_nimble.sh \
+            --kind release --nimble-version 0.16.4 --arch ARM64 \
+            --parent-nimble-install-directory "$RUNNER_TEMP" \
+            --nimble-install-directory fallback_check \
+            --os macOS 2>&1)
+          echo "$out"
+
+          if ! printf '%s' "$out" | grep -q '::warning title=Nimble architecture fallback::'; then
+            echo "Expected a ::warning:: annotation for the x64 fallback"
+            exit 1
+          fi
+
+          bin="$RUNNER_TEMP/fallback_check/bin/nimble"
+          if ! file -b "$bin" | grep -q 'x86_64'; then
+            echo "Expected the fallback binary to be x86_64, got: $(file -b "$bin")"
+            exit 1
+          fi
+          "$bin" -v > /dev/null
+          echo "ok: warned, installed x64, and it runs"
+

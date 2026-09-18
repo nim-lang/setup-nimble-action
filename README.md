@@ -22,6 +22,17 @@ steps:
 `repo-token` is used for [Rate limiting](https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting).
 It works without setting this parameter, but please set it if you get rate limit errors.
 
+### Architecture
+
+The action installs a Nimble matching the runner's architecture, so Apple Silicon
+and arm64 Linux runners get a native binary rather than an emulated x86_64 one.
+
+Nimble does not publish a native binary for every architecture on every release —
+`macosx_aarch64` starts at 0.22.2, and Windows has no arm64 build. Where one is
+missing the action installs the x64 binary and emits a warning annotation, since
+an emulated Nimble goes on to resolve an x64 Nim, which makes NimScript report
+`amd64` on an arm64 machine.
+
 ### Pin to a commit or branch
 
 `nimble-version` also accepts a commit SHA or a branch name from

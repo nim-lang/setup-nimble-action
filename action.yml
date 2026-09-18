@@ -179,6 +179,7 @@ runs:
         BOOTSTRAP_DIR: ${{ runner.temp }}/setup-nimble-bootstrap-nim
         SOURCE_DIR: ${{ runner.temp }}/setup-nimble-src
         RUNNER_OS_NAME: ${{ runner.os }}
+        RUNNER_ARCH_NAME: ${{ runner.arch }}
       run: |
         "$ACTION_PATH/install_nimble.sh" \
           --kind "$NIMBLE_KIND" \
@@ -188,7 +189,8 @@ runs:
           --nimble-install-directory "$INSTALL_DIR" \
           --nim-bootstrap-directory "$BOOTSTRAP_DIR" \
           --source-directory "$SOURCE_DIR" \
-          --os "$RUNNER_OS_NAME"
+          --os "$RUNNER_OS_NAME" \
+          --arch "$RUNNER_ARCH_NAME"
 
     - name: Save nimble build to cache
       if: steps.resolve.outputs.kind == 'source' && steps.cache-nimble.outputs.cache-hit != 'true' && steps.install.outcome == 'success'

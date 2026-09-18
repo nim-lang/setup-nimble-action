@@ -23,6 +23,16 @@ err() {
   echo "$(date +"$DATE_FORMAT") [ERR] $*" >&2
 }
 
+# A fallback to a non-native binary is exactly the kind of thing that otherwise
+# passes unnoticed -- the job stays green and only `file` on the artifact shows
+# anything is wrong -- so raise it as an annotation, not just a log line.
+warn() {
+  echo "$(date +"$DATE_FORMAT") [WARN] $*"
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "::warning title=Nimble architecture fallback::$*"
+  fi
+}
+
 # Echoes a usable nim executable, preferring one the user already provided.
 find_nim() {
   if command -v nim > /dev/null 2>&1; then
@@ -68,43 +78,96 @@ install_windows_certs() {
   curl -sSL "https://curl.se/ca/cacert.pem" -o "${nimble_install_dir}/bin/cacert.pem"
 }
 
+# Maps a runner architecture to the token nimble uses in its release asset
+# names. Accepts both RUNNER_ARCH spellings (X64, ARM64) and `uname -m` ones.
+#
+# NOTE: these tokens are nimble's, not Nim's. nimble releases say `aarch64`
+# where nim-lang/nightlies says `arm64`, so this must NOT be merged with
+# target_name() in install_nim_bootstrap.sh -- they name different things.
+asset_arch() {
+  case "$1" in
+  X64 | x86_64 | amd64) echo "x64" ;;
+  ARM64 | arm64 | aarch64) echo "aarch64" ;;
+  X86 | i686 | i386) echo "x32" ;;
+  ARM | armv7l) echo "armv7l" ;;
+  *) echo "" ;;
+  esac
+}
+
+asset_url_for() {
+  local a base
+  a=$1
+  base="${NIMBLE_REPO_URL}/releases/download"
+  if [[ "$os" = "Windows" ]]; then
+    echo "${base}/${release_tag}/nimble-windows_${a}.zip"
+  elif [[ "$os" = "macOS" || "$os" = "Darwin" ]]; then
+    echo "${base}/${release_tag}/nimble-macosx_${a}.tar.gz"
+  else
+    echo "${base}/${release_tag}/nimble-linux_${a}.tar.gz"
+  fi
+}
+
 # Downloads and unpacks a prebuilt release asset.
 #
 # The download is a separate, checked step rather than `curl | tar`: in a
 # pipeline only the LAST command's status is visible without pipefail, so a
 # failed download would be silently unpacked as an empty archive, leaving an
 # empty bin/ and a zero exit status.
+#
+# Native assets are not published for every arch on every release --
+# macosx_aarch64 starts at 0.22.2, and Windows has no arm64 asset at all -- so
+# a missing native asset falls back to x64 rather than failing. On Apple
+# Silicon that binary runs under Rosetta, which is worth knowing about: a
+# translated nimble sees `uname -m` as x86_64 and will go on to install an
+# x86_64 Nim, whose NimScript VM then reports amd64 on an arm64 machine.
 download_release() {
-  local arch base tag download_url archive
-
-  arch="x64"
-  base="${NIMBLE_REPO_URL}/releases/download"
+  local want_arch download_url archive
 
   # 'latest' is the rolling prerelease tag; everything else is a v-prefixed tag.
   if [[ "$nimble_version" = "latest" ]]; then
-    tag="latest"
+    release_tag="latest"
   else
-    tag="v${nimble_version}"
+    release_tag="v${nimble_version}"
+  fi
+
+  want_arch=$(asset_arch "$nimble_arch")
+  if [[ -z "$want_arch" ]]; then
+    warn "Unrecognised architecture '${nimble_arch}'; falling back to x64."
+    want_arch="x64"
   fi
 
   if [[ "$os" = "Windows" ]]; then
-    download_url="${base}/${tag}/nimble-windows_${arch}.zip"
     archive="nimble.zip"
-  elif [[ "$os" = "macOS" || "$os" = "Darwin" ]]; then
-    download_url="${base}/${tag}/nimble-macosx_${arch}.tar.gz"
-    archive="nimble.tar.gz"
   else
-    download_url="${base}/${tag}/nimble-linux_${arch}.tar.gz"
     archive="nimble.tar.gz"
   fi
 
+  download_url=$(asset_url_for "$want_arch")
   info "Downloading from: ${download_url}"
+
   if ! curl -fsSL "${download_url}" -o "$archive"; then
-    err "No prebuilt nimble at ${download_url}"
-    err "Resolution confirms a tag exists, but not that it published binaries;"
-    err "early nimble releases have none. Try a newer version, or 'latest'."
     rm -f "$archive"
-    exit 1
+
+    if [[ "$want_arch" = "x64" ]]; then
+      err "No prebuilt nimble at ${download_url}"
+      err "Resolution confirms a tag exists, but not that it published binaries;"
+      err "early nimble releases have none. Try a newer version, or 'latest'."
+      exit 1
+    fi
+
+    warn "nimble ${nimble_version} publishes no ${want_arch} binary for this" \
+      "platform; installing the x64 one instead. It will run emulated, and" \
+      "nimble will resolve an x64 Nim, so NimScript will report amd64. Use a" \
+      "newer nimble, or a commit-ish pin, to get a native build."
+
+    want_arch="x64"
+    download_url=$(asset_url_for "$want_arch")
+    info "Downloading from: ${download_url}"
+    if ! curl -fsSL "${download_url}" -o "$archive"; then
+      err "No prebuilt nimble at ${download_url}"
+      rm -f "$archive"
+      exit 1
+    fi
   fi
 
   mkdir -p "${nimble_install_dir}/bin"
@@ -192,6 +255,10 @@ os="Linux"
 parent_nimble_install_dir=""
 nim_bootstrap_dir=""
 source_dir=""
+# Defaults to the host arch so the script stays usable outside Actions; the
+# action passes runner.arch explicitly.
+nimble_arch="$(uname -m)"
+release_tag=""
 
 while ((0 < $#)); do
   opt=$1
@@ -227,6 +294,10 @@ while ((0 < $#)); do
     ;;
   --os)
     os=$1
+    shift
+    ;;
+  --arch)
+    nimble_arch=$1
     shift
     ;;
   *)
@@ -273,5 +344,15 @@ esac
 
 info "Contents of ${nimble_install_dir}/bin:"
 ls -la "${nimble_install_dir}/bin"
+
+# The whole point of the arch handling above is that a mismatch should never be
+# something you discover later by running `file` on a build artefact.
+installed_bin="${nimble_install_dir}/bin/nimble"
+if [[ ! -f "$installed_bin" ]]; then
+  installed_bin="${nimble_install_dir}/bin/nimble.exe"
+fi
+if command -v file > /dev/null 2>&1 && [[ -f "$installed_bin" ]]; then
+  info "Installed binary: $(file -b "$installed_bin")"
+fi
 
 info "Nimble installation complete"
