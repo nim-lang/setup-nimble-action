@@ -13,7 +13,7 @@ See [action.yml](action.yml)
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: nim-lang/setup-nimble-action@v1
+  - uses: nim-lang/setup-nimble-action@v2
     with:
       nimble-version: '0.16.4' # default is 'latest'. You could also use `nightly` to get #HEAD
       repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -21,6 +21,19 @@ steps:
 
 `repo-token` is used for [Rate limiting](https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting).
 It works without setting this parameter, but please set it if you get rate limit errors.
+
+### Versions
+
+`@v2` is the current major version. `@v1` is frozen and still works, so existing
+workflows keep running unchanged until you choose to move.
+
+Two things changed in v2:
+
+- Nimble is installed for the runner's architecture, so Apple Silicon runners get a
+  native arm64 binary instead of an emulated x86_64 one. **If a macOS job builds for
+  an architecture other than the runner's own, pass the target explicitly** — for
+  example `--passC:"-target x86_64-apple-macos11"` alongside `--cpu:amd64`.
+- `nimble-version` accepts a commit SHA or branch name, built from source.
 
 ### Architecture
 
@@ -43,7 +56,7 @@ and a Nim compiler is downloaded for the build unless `nim` is already on `PATH`
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: nim-lang/setup-nimble-action@v1
+  - uses: nim-lang/setup-nimble-action@v2
     with:
       nimble-version: 'a1b471d13d173897942f99d013f4efb79913bdf2' # or a branch, e.g. 'master'
       repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -54,7 +67,7 @@ steps:
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: nim-lang/setup-nimble-action@v1
+  - uses: nim-lang/setup-nimble-action@v2
     with:
       nimble-version: 'latest'
       repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -74,7 +87,7 @@ steps:
       restore-keys: |
         ${{ runner.os }}-nimble-
     if: runner.os != 'Windows'
-  - uses: nim-lang/setup-nimble-action@v1
+  - uses: nim-lang/setup-nimble-action@v2
     with:
       repo-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -95,7 +108,7 @@ jobs:
           - macOS-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: nim-lang/setup-nimble-action@v1
+      - uses: nim-lang/setup-nimble-action@v2
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -105,7 +118,7 @@ jobs:
 The action installs Nimble to `.nimble_runtime` directory by default. You can change this using:
 
 ```yaml
-  - uses: nim-lang/setup-nimble-action@v1
+  - uses: nim-lang/setup-nimble-action@v2
     with:
       nimble-version: latest
       repo-token: ${{ secrets.GITHUB_TOKEN }}
