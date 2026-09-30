@@ -13,6 +13,8 @@ jobs:
   release:
     if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -24,28 +26,31 @@ jobs:
 
       # Update corresponding major and minor tag.
       # e.g. Update v1 and v1.2 when releasing v1.2.3
+      #
+      # Guarded on next_version rather than "!skip": on a tag push the bumpr
+      # step above is skipped entirely, so `skip` is empty -- and "!<empty>" is
+      # truthy, which would run this step with an empty tag input.
       - uses: haya14busa/action-update-semver@v1
-        if: "!steps.bumpr.outputs.skip"
+        if: steps.bumpr.outputs.next_version != ''
         with:
           tag: ${{ steps.bumpr.outputs.next_version }}
 
-      # Get tag name.
+      # Get tag name. ref_name, not ref: github.ref is "refs/tags/v1.2.3", so
+      # using it would tag and name the release after the whole ref.
       - id: tag
         uses: haya14busa/action-cond@v1
         with:
           cond: "${{ startsWith(github.ref, 'refs/tags/') }}"
-          if_true: ${{ github.ref }}
+          if_true: ${{ github.ref_name }}
           if_false: ${{ steps.bumpr.outputs.next_version }}
 
-      # Create release.
-      - uses: actions/create-release@v1
+      # Create release. actions/create-release was archived in 2021 and still
+      # declares `using: node12`, so it is replaced with a maintained action.
+      - uses: softprops/action-gh-release@v2
         if: "steps.tag.outputs.value != ''"
-        env:
-          # This token is provided by Actions, you do not need to create your own token
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.tag.outputs.value }}
-          release_name: ${{ steps.tag.outputs.value }}
+          name: ${{ steps.tag.outputs.value }}
           body: ${{ steps.bumpr.outputs.message }}
           draft: false
           prerelease: false
