@@ -195,6 +195,7 @@ jobs:
           assert_resolves "0.16.4" "kind=release version=0.16.4 sha="
           assert_resolves "v0.16.4" "kind=release version=0.16.4 sha="
           assert_matches "0.16.x" '^kind=release version=0\.16\.[0-9]+ sha=$'
+          assert_matches "latest" '^kind=release version=[0-9]+\.[0-9]+(\.[0-9]+)? sha=$'
           assert_resolves "nightly" "kind=release version=latest sha="
           assert_resolves "a1b471d" "kind=source version=a1b471d sha=a1b471d13d173897942f99d013f4efb79913bdf2"
           assert_resolves "a1b471d13d173897942f99d013f4efb79913bdf2" "kind=source version=a1b471d13d173897942f99d013f4efb79913bdf2 sha=a1b471d13d173897942f99d013f4efb79913bdf2"
@@ -202,9 +203,98 @@ jobs:
           assert_matches "master" '^kind=source version=master sha=[0-9a-f]{40}$'
 
           assert_fails "9.9.9"
+          # 0.13.0 and 0.13.1 are tagged but were never released, so there is
+          # nothing to download; a wildcard must only match published releases.
+          assert_fails "0.13.x"
           assert_fails "definitely-not-a-real-ref"
           # A ref must not be able to redirect the API call to another repo.
           assert_fails "../../../repos/torvalds/linux/commits/master"
+
+  # nimble republishes its nightly assets on every push to its master, and each
+  # is a 404 until its upload finishes. A fake curl that 404s stands in for that.
+  # arm64 is requested on an x64 runner because there a mishandled 404 does not
+  # fail the install -- it quietly installs the x64 binary instead.
+  test-download-retry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retry a nightly 404, and only a nightly 404
+        shell: bash
+        run: |
+          set -eu
+          shim="$RUNNER_TEMP/shim"
+          mkdir -p "$shim"
+          # Fails the first $FAILS calls with a 404, printed the way
+          # -w '%{http_code}' prints it, then hands off to the real curl.
+          cat > "$shim/curl" <<EOF
+          #!/bin/bash
+          n=\$(cat "$RUNNER_TEMP/calls" 2>/dev/null || echo 0)
+          echo \$((n + 1)) > "$RUNNER_TEMP/calls"
+          if ((n < FAILS)); then
+            printf 404
+            exit 22
+          fi
+          exec $(command -v curl) "\$@"
+          EOF
+          chmod +x "$shim/curl"
+
+          run_install() {
+            local fails=$1
+            shift
+            rm -f "$RUNNER_TEMP/calls"
+            rm -rf "$RUNNER_TEMP/retry_check"
+            FAILS=$fails PATH="$shim:$PATH" GITHUB_ACTIONS=true ./install_nimble.sh \
+              --parent-nimble-install-directory "$RUNNER_TEMP" \
+              --nimble-install-directory retry_check --os Linux "$@" 2>&1
+          }
+
+          if ! out=$(run_install 2 --kind release --nimble-version latest --arch ARM64); then
+            echo "$out"
+            echo "Expected the nightly install to outlast two 404s"
+            exit 1
+          fi
+          echo "$out"
+          if [[ "$(cat "$RUNNER_TEMP/calls")" != "3" ]]; then
+            echo "Expected two 404s to be retried and the third download to succeed"
+            exit 1
+          fi
+          if printf '%s' "$out" | grep -q '::warning'; then
+            echo "A nightly 404 must be retried, not fall back to x64"
+            exit 1
+          fi
+          if ! file -b "$RUNNER_TEMP/retry_check/bin/nimble" | grep -q 'aarch64'; then
+            echo "Expected an aarch64 binary"
+            exit 1
+          fi
+          echo "ok: nightly 404 retried, native binary kept"
+
+          # A versioned release is public only once every asset is uploaded, so
+          # its 404 means "not published yet" and waiting a minute won't help.
+          if out=$(run_install 99 --kind release --nimble-version 0.26.2 --arch X64); then
+            echo "Expected a 404 to fail the install"
+            exit 1
+          fi
+          echo "$out"
+          if [[ "$(cat "$RUNNER_TEMP/calls")" != "1" ]]; then
+            echo "Expected a versioned 404 to fail without retrying"
+            exit 1
+          fi
+          if ! printf '%s' "$out" | grep -q 'may still be being published'; then
+            echo "Expected the error to say the release may still be being published"
+            exit 1
+          fi
+          echo "ok: versioned 404 failed at once, and said why"
+
+          if out=$(run_install 0 --kind release --nimble-version 0.14.2 --arch X64); then
+            echo "Expected 0.14.2, which has no binaries, to fail"
+            exit 1
+          fi
+          echo "$out"
+          if ! printf '%s' "$out" | grep -q 'predates'; then
+            echo "Expected the error to say 0.14.2 predates nimble's binaries"
+            exit 1
+          fi
+          echo "ok: pre-0.16.0 release failed with its own reason"
 
   # The installed nimble must match the runner it is on. `latest` publishes a
   # native asset for every arch here

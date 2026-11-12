@@ -66,6 +66,38 @@ list_tags() {
     { grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || true; }
 }
 
+# A tag is not a download. nimble pushes a tag, builds its binaries into a draft
+# release, and publishes that draft by hand -- 34 minutes later for 0.26.2, three
+# and a half hours for 0.26.1 -- so until then the newest tag has nothing behind
+# it. The two lookups below see only published releases, never drafts or
+# prereleases (the rolling 'latest' is one).
+
+# The version of GitHub's latest release, `v` prefix stripped.
+latest_release() {
+  local body
+  if ! body=$(api_get "https://api.github.com/repos/${NIMBLE_REPO}/releases/latest"); then
+    return 1
+  fi
+  printf '%s' "$body" |
+    jq -r '.tag_name // empty' |
+    sed -E 's:^v::' |
+    { grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || true; }
+}
+
+# Every published release version, one per line, `v` prefix stripped.
+# per_page=100 covers nimble's ~45 releases; like list_tags, this needs to follow
+# pagination if that is ever exceeded.
+list_releases() {
+  local body
+  if ! body=$(api_get "https://api.github.com/repos/${NIMBLE_REPO}/releases?per_page=100"); then
+    return 1
+  fi
+  printf '%s' "$body" |
+    jq -r 'if type == "array" then .[] | select((.draft or .prerelease) | not) | .tag_name else empty end' |
+    sed -E 's:^v::' |
+    { grep -E '^[0-9]+\.[0-9]+(\.[0-9]+)?$' || true; }
+}
+
 latest_version() {
   sort -V | tail -n1
 }
@@ -153,12 +185,12 @@ if [[ "$nimble_version" = "nightly" ]]; then
 
 elif [[ "$nimble_version" = "latest" ]]; then
   info "Finding the latest released version..."
-  if ! tags=$(list_tags); then
-    err "Failed to fetch nimble tags from GitHub. If this is a rate limit, set"
-    err "the repo-token input, or pin an exact version, which needs no API call."
+  if ! version=$(latest_release); then
+    err "Failed to fetch the latest nimble release from GitHub. If this is a rate"
+    err "limit, set the repo-token input, or pin an exact version, which needs no"
+    err "API call."
     exit 1
   fi
-  version=$(printf '%s' "$tags" | latest_version)
   if [[ -z "$version" ]]; then
     err "Failed to determine the latest version"
     exit 1
@@ -167,14 +199,14 @@ elif [[ "$nimble_version" = "latest" ]]; then
   kind="release"
 
 elif [[ "$nimble_version" =~ ^[0-9]+\.[0-9]+\.x$ ]] || [[ "$nimble_version" =~ ^[0-9]+\.x$ ]]; then
-  if ! tags=$(list_tags); then
-    err "Failed to fetch nimble tags from GitHub. If this is a rate limit, set"
+  if ! releases=$(list_releases); then
+    err "Failed to fetch nimble releases from GitHub. If this is a rate limit, set"
     err "the repo-token input, or pin an exact version, which needs no API call."
     exit 1
   fi
-  version=$(printf '%s' "$tags" | { grep -E "$(tag_regexp "$nimble_version")" || true; } | latest_version)
+  version=$(printf '%s' "$releases" | { grep -E "$(tag_regexp "$nimble_version")" || true; } | latest_version)
   if [[ -z "$version" ]]; then
-    err "No released nimble version matches '${nimble_version}'"
+    err "No published nimble release matches '${nimble_version}'"
     exit 1
   fi
   info "Resolved ${nimble_version} to ${version}"

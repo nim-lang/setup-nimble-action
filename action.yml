@@ -8,7 +8,9 @@ inputs:
     description: >-
       The Nimble version to install. Accepts a release version ('0.16.3'), a
       wildcard ('0.16.x'), 'latest', 'nightly', or any commit-ish in
-      nim-lang/nimble -- a commit SHA, short SHA, branch or tag. A commit-ish is
+      nim-lang/nimble -- a commit SHA, short SHA, branch or tag. 'latest' and
+      wildcards pick from published releases only, so a version that is tagged
+      but still having its binaries published is not chosen. A commit-ish is
       built from source, which is slower than a release download but pins the
       build reproducibly.
     default: 'latest'

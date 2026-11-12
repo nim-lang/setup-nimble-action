@@ -15,6 +15,14 @@ DATE_FORMAT="%Y-%m-%d %H:%M:%S"
 
 NIMBLE_REPO_URL="https://github.com/nim-lang/nimble"
 
+# Releases before this one have no prebuilt binaries at all.
+FIRST_BINARY_RELEASE="0.16.0"
+
+# Six tries, ten seconds apart, give a 50s window; see download_release for
+# what that has to outlast.
+DOWNLOAD_ATTEMPTS=6
+DOWNLOAD_RETRY_DELAY=10
+
 info() {
   echo "$(date +"$DATE_FORMAT") [INFO] $*"
 }
@@ -107,6 +115,64 @@ asset_url_for() {
   fi
 }
 
+status_text() {
+  if [[ "$download_status" = "000" ]]; then
+    echo "no response"
+  else
+    echo "HTTP ${download_status}"
+  fi
+}
+
+# Downloads $1 to $2, retrying failures that may be transient. A 404 is retried
+# only when $3 is "true"; otherwise it is final at once. Leaves the last HTTP
+# status in download_status, "000" when no response arrived.
+#
+# This loops rather than using curl's --retry-all-errors, which needs curl 7.71:
+# newer than Ubuntu 20.04 or Debian 10 ship, and a container job runs this with
+# the container's curl.
+fetch() {
+  local url out retry_404 attempt
+  url=$1
+  out=$2
+  retry_404=$3
+  for ((attempt = 1; ; attempt++)); do
+    if download_status=$(curl -fsSL -o "$out" -w '%{http_code}' "$url"); then
+      return 0
+    fi
+    if [[ "$download_status" = "404" && "$retry_404" != "true" ]] ||
+      ((attempt >= DOWNLOAD_ATTEMPTS)); then
+      return 1
+    fi
+    info "Attempt ${attempt} of ${DOWNLOAD_ATTEMPTS} failed ($(status_text));" \
+      "retrying in ${DOWNLOAD_RETRY_DELAY}s"
+    sleep "$DOWNLOAD_RETRY_DELAY"
+  done
+}
+
+# Explains why the download of $1 failed for good, and exits.
+download_failed() {
+  local url
+  url=$1
+  if [[ "$download_status" != "404" ]]; then
+    err "Failed to download ${url}: $(status_text) after ${DOWNLOAD_ATTEMPTS} attempts"
+    exit 1
+  fi
+
+  err "No prebuilt nimble at ${url}"
+  if [[ "$release_tag" = "latest" ]]; then
+    err "nimble republishes its nightly binaries on every push to its master, and"
+    err "this one was still missing $(((DOWNLOAD_ATTEMPTS - 1) * DOWNLOAD_RETRY_DELAY))s later. Re-run the job, or pin a release."
+  elif [[ "$(printf '%s\n' "$nimble_version" "$FIRST_BINARY_RELEASE" | sort -V | head -n1)" != "$FIRST_BINARY_RELEASE" ]]; then
+    err "nimble ${nimble_version} predates nimble's prebuilt binaries, which start"
+    err "at ${FIRST_BINARY_RELEASE}. Pin a newer version."
+  else
+    err "nimble pushes a release's tag before it publishes the binaries, sometimes"
+    err "hours before, so ${release_tag} may still be being published. Try again"
+    err "later, or pin the previous release."
+  fi
+  exit 1
+}
+
 # Downloads and unpacks a prebuilt release asset.
 #
 # The download is a separate, checked step rather than `curl | tar`: in a
@@ -121,7 +187,7 @@ asset_url_for() {
 # translated nimble sees `uname -m` as x86_64 and will go on to install an
 # x86_64 Nim, whose NimScript VM then reports amd64 on an arm64 machine.
 download_release() {
-  local want_arch download_url archive
+  local want_arch download_url native_url archive retry_404 native_retry_404
 
   # 'latest' is the rolling prerelease tag; everything else is a v-prefixed tag.
   if [[ "$nimble_version" = "latest" ]]; then
@@ -142,32 +208,47 @@ download_release() {
     archive="nimble.tar.gz"
   fi
 
+  # nimble's binaries.yml republishes the rolling 'latest' release on every push
+  # to its master and every tag build, deleting all the assets before uploading
+  # the new ones one by one, so a nightly asset can 404 for the ~15s that takes.
+  # A versioned release goes public only once its draft holds every asset, so
+  # there a 404 is final, and retrying it would only delay the error.
+  retry_404=false
+  if [[ "$release_tag" = "latest" ]]; then
+    retry_404=true
+  fi
+  # nimble has never published a Windows arm64 binary, so waiting out that 404
+  # would hold up the x64 fallback below by most of a minute on every run.
+  native_retry_404=$retry_404
+  if [[ "$os" = "Windows" && "$want_arch" = "aarch64" ]]; then
+    native_retry_404=false
+  fi
+
   download_url=$(asset_url_for "$want_arch")
   info "Downloading from: ${download_url}"
 
-  if ! curl -fsSL "${download_url}" -o "$archive"; then
+  if ! fetch "$download_url" "$archive" "$native_retry_404"; then
     rm -f "$archive"
 
-    if [[ "$want_arch" = "x64" ]]; then
-      err "No prebuilt nimble at ${download_url}"
-      err "Resolution confirms a tag exists, but not that it published binaries;"
-      err "early nimble releases have none. Try a newer version, or 'latest'."
-      exit 1
+    # Only a 404 says this arch is not published. Anything else has outlasted
+    # the retries, and is no reason to quietly install a non-native binary.
+    if [[ "$want_arch" = "x64" || "$download_status" != "404" ]]; then
+      download_failed "$download_url"
+    fi
+
+    native_url=$download_url
+    download_url=$(asset_url_for "x64")
+    info "No ${want_arch} binary at ${native_url}"
+    info "Downloading from: ${download_url}"
+    if ! fetch "$download_url" "$archive" "$retry_404"; then
+      rm -f "$archive"
+      download_failed "$download_url"
     fi
 
     warn "nimble ${nimble_version} publishes no ${want_arch} binary for this" \
       "platform; installing the x64 one instead. It will run emulated, and" \
       "nimble will resolve an x64 Nim, so NimScript will report amd64. Use a" \
       "newer nimble, or a commit-ish pin, to get a native build."
-
-    want_arch="x64"
-    download_url=$(asset_url_for "$want_arch")
-    info "Downloading from: ${download_url}"
-    if ! curl -fsSL "${download_url}" -o "$archive"; then
-      err "No prebuilt nimble at ${download_url}"
-      rm -f "$archive"
-      exit 1
-    fi
   fi
 
   mkdir -p "${nimble_install_dir}/bin"
