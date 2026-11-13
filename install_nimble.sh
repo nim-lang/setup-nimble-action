@@ -86,6 +86,52 @@ install_windows_certs() {
   curl -sSL "https://curl.se/ca/cacert.pem" -o "${nimble_install_dir}/bin/cacert.pem"
 }
 
+# Prints a file's SHA-256 as lowercase hex. sha256sum is coreutils (Linux, Git
+# Bash), shasum is perl (macOS); neither is present everywhere.
+sha256_of() {
+  local out
+  if command -v sha256sum > /dev/null 2>&1; then
+    out=$(sha256sum "$1")
+  elif command -v shasum > /dev/null 2>&1; then
+    out=$(shasum -a 256 "$1")
+  else
+    return 1
+  fi
+  echo "${out%% *}"
+}
+
+# Runs on the archive as downloaded, before any of it is extracted, let alone
+# executed. The hash is always logged, so it can be copied into nimble-sha256;
+# when that input is set, any other archive is deleted and the install fails.
+verify_archive() {
+  local archive url actual
+  archive=$1
+  url=$2
+
+  if ! actual=$(sha256_of "$archive"); then
+    if [[ -n "$archive_sha256" ]]; then
+      err "nimble-sha256 is set, but there is no sha256sum or shasum to check it with"
+      rm -f "$archive"
+      exit 1
+    fi
+    return 0
+  fi
+  info "SHA-256 of ${url##*/}: ${actual}"
+
+  if [[ -z "$archive_sha256" ]]; then
+    return 0
+  fi
+  if [[ "$actual" != "$archive_sha256" ]]; then
+    err "${url} does not match nimble-sha256"
+    err "  expected: ${archive_sha256}"
+    err "  actual:   ${actual}"
+    err "The hash differs per OS and architecture; check it is the one for this runner."
+    rm -f "$archive"
+    exit 1
+  fi
+  info "Matches nimble-sha256"
+}
+
 # Maps a runner architecture to the token nimble uses in its release asset
 # names. Accepts both RUNNER_ARCH spellings (X64, ARM64) and `uname -m` ones.
 #
@@ -251,6 +297,8 @@ download_release() {
       "newer nimble, or a commit-ish pin, to get a native build."
   fi
 
+  verify_archive "$archive" "$download_url"
+
   mkdir -p "${nimble_install_dir}/bin"
 
   if [[ "$os" = "Windows" ]]; then
@@ -340,6 +388,7 @@ source_dir=""
 # action passes runner.arch explicitly.
 nimble_arch="$(uname -m)"
 release_tag=""
+archive_sha256=""
 
 while ((0 < $#)); do
   opt=$1
@@ -375,6 +424,10 @@ while ((0 < $#)); do
     ;;
   --os)
     os=$1
+    shift
+    ;;
+  --archive-sha256)
+    archive_sha256=$1
     shift
     ;;
   --arch)
