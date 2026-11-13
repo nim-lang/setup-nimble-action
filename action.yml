@@ -29,6 +29,17 @@ inputs:
   repo-token:
     description: 'The GITHUB_TOKEN secret'
     required: false
+  nimble-sha256:
+    description: >-
+      The expected SHA-256 of the downloaded nimble release archive, as 64 hex
+      characters, optionally prefixed with 'sha256:'. If the archive differs,
+      the action fails before extracting anything. The hash differs per OS and
+      architecture, so pair it with an exact nimble-version and set one per
+      matrix entry. GitHub lists each asset's digest on the release page, and
+      the action logs the hash of every archive it downloads. Not accepted with
+      a commit-ish, which its commit SHA already pins.
+    default: ''
+    required: false
   install-dlls:
     description: 'Install Nim DLLs on Windows'
     default: 'true'
@@ -66,6 +77,7 @@ runs:
       shell: bash
       env:
         NIMBLE_VERSION: ${{ inputs.nimble-version }}
+        NIMBLE_SHA256: ${{ inputs.nimble-sha256 }}
         REPO_TOKEN: ${{ inputs.repo-token }}
         PARENT_DIR: ${{ inputs.parent-nimble-install-directory }}
         INSTALL_DIR: ${{ inputs.nimble-install-directory }}
@@ -74,6 +86,7 @@ runs:
       run: |
         "$ACTION_PATH/resolve_nimble_version.sh" \
           --nimble-version "$NIMBLE_VERSION" \
+          --nimble-sha256 "$NIMBLE_SHA256" \
           --repo-token "$REPO_TOKEN"
 
         # actions/cache is a Node action, so this must be a native path. Using
@@ -176,6 +189,7 @@ runs:
         NIMBLE_KIND: ${{ steps.resolve.outputs.kind }}
         NIMBLE_RESOLVED_VERSION: ${{ steps.resolve.outputs.version }}
         NIMBLE_SHA: ${{ steps.resolve.outputs.sha }}
+        NIMBLE_ARCHIVE_SHA256: ${{ steps.resolve.outputs.archive_sha256 }}
         PARENT_DIR: ${{ inputs.parent-nimble-install-directory }}
         INSTALL_DIR: ${{ inputs.nimble-install-directory }}
         BOOTSTRAP_DIR: ${{ runner.temp }}/setup-nimble-bootstrap-nim
@@ -187,6 +201,7 @@ runs:
           --kind "$NIMBLE_KIND" \
           --nimble-version "$NIMBLE_RESOLVED_VERSION" \
           --nimble-sha "$NIMBLE_SHA" \
+          --archive-sha256 "$NIMBLE_ARCHIVE_SHA256" \
           --parent-nimble-install-directory "$PARENT_DIR" \
           --nimble-install-directory "$INSTALL_DIR" \
           --nim-bootstrap-directory "$BOOTSTRAP_DIR" \

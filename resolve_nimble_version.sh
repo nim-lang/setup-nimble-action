@@ -2,10 +2,12 @@
 
 # Resolves the `nimble-version` action input into a concrete install plan.
 #
-# Emits three key=value pairs on stdout, and to $GITHUB_OUTPUT when set:
-#   kind     "release" (download a prebuilt asset) or "source" (build a commit)
-#   version  the resolved release version, or the original input for a source build
-#   sha      the full commit SHA for a source build, empty otherwise
+# Emits four key=value pairs on stdout, and to $GITHUB_OUTPUT when set:
+#   kind            "release" (download a prebuilt asset) or "source" (build a commit)
+#   version         the resolved release version, or the original input for a source build
+#   sha             the full commit SHA for a source build, empty otherwise
+#   archive_sha256  the archive's expected SHA-256 from `nimble-sha256`, as
+#                   lowercase hex, empty when not pinned
 #
 # Resolution is first-match-wins, so every value that worked before still takes
 # the same path; only unrecognised input falls through to the commit-ish branch.
@@ -139,6 +141,7 @@ emit() {
 # parse commandline args
 nimble_version="latest"
 repo_token=""
+archive_sha256=""
 
 while ((0 < $#)); do
   opt=$1
@@ -152,6 +155,10 @@ while ((0 < $#)); do
     repo_token=$1
     shift
     ;;
+  --nimble-sha256)
+    archive_sha256=$1
+    shift
+    ;;
   *)
     err "Unknown option '${opt}'"
     exit 1
@@ -163,6 +170,16 @@ nimble_version=$(echo "$nimble_version" | tr -d '[:space:]')
 
 if [[ -z "$nimble_version" ]]; then
   err "nimble-version is empty"
+  exit 1
+fi
+
+# GitHub shows each release asset's digest as "sha256:<hex>", so that spelling is
+# accepted as pasted.
+archive_sha256=$(echo "$archive_sha256" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+archive_sha256=${archive_sha256#sha256:}
+if [[ -n "$archive_sha256" && ! "$archive_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+  err "nimble-sha256 must be a SHA-256 digest: 64 hex characters, optionally"
+  err "prefixed with 'sha256:'."
   exit 1
 fi
 
@@ -251,6 +268,15 @@ else
   kind="source"
 fi
 
+# Failing beats ignoring a pin: a commit-ish is built from source, so there is
+# no archive to check -- the commit SHA already pins it.
+if [[ -n "$archive_sha256" && "$kind" = "source" ]]; then
+  err "nimble-sha256 pins a release archive, but '${nimble_version}' is built"
+  err "from source, and its commit SHA already pins it. Remove nimble-sha256."
+  exit 1
+fi
+
 emit kind "$kind"
 emit version "$version"
 emit sha "$sha"
+emit archive_sha256 "$archive_sha256"

@@ -62,6 +62,28 @@ steps:
       repo-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+### Verify the downloaded release
+
+Set `nimble-sha256` to the expected SHA-256 of the release archive, and the
+action fails before extracting anything that doesn't match. The archive differs
+per OS and architecture, so pin an exact version and give each matrix entry its
+own hash. GitHub shows each asset's digest on the
+[release page](https://github.com/nim-lang/nimble/releases), and the action
+logs the hash of every archive it downloads. A commit-ish needs no hash: its
+commit SHA already pins it. The pin covers the nimble archive only; on Windows,
+the CA bundle (`cacert.pem`) and the Nim DLLs are still downloaded unpinned.
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: nim-lang/setup-nimble-action@v2
+    with:
+      nimble-version: '0.26.2'
+      # nimble-linux_x64.tar.gz, for a Linux x64 runner
+      nimble-sha256: 'sha256:facaf75407ea8cc4bb6b862a3299efa90ac57e05faa9e498402d0950e9d5cd2a'
+      repo-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
 ### Setup latest version
 
 ```yaml
